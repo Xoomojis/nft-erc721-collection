@@ -6,8 +6,9 @@ import 'erc721a/contracts/extensions/ERC721AQueryable.sol';
 import '@openzeppelin/contracts/access/Ownable.sol';
 import '@openzeppelin/contracts/utils/cryptography/MerkleProof.sol';
 import '@openzeppelin/contracts/security/ReentrancyGuard.sol';
+import '@openzeppelin/contracts/token/common/ERC2981.sol';
 
-contract YourNftToken is ERC721AQueryable, Ownable, ReentrancyGuard {
+contract Xoomojis is ERC721AQueryable, ERC2981, Ownable, ReentrancyGuard {
 
   using Strings for uint256;
 
@@ -21,6 +22,9 @@ contract YourNftToken is ERC721AQueryable, Ownable, ReentrancyGuard {
   uint256 public cost;
   uint256 public maxSupply;
   uint256 public maxMintAmountPerTx;
+
+  address public royaltyAddress = 0x3e27D2BCDf3865D65E7Cd1ab07B684238E0d42D0;
+  uint96 public royaltyFee = 450;
 
   bool public paused = true;
   bool public whitelistMintEnabled = false;
@@ -38,8 +42,13 @@ contract YourNftToken is ERC721AQueryable, Ownable, ReentrancyGuard {
     maxSupply = _maxSupply;
     setMaxMintAmountPerTx(_maxMintAmountPerTx);
     setHiddenMetadataUri(_hiddenMetadataUri);
+    _setDefaultRoyalty(royaltyAddress, royaltyFee);
   }
 
+  function supportsInterface(bytes4 interfaceId) public view virtual override(ERC721A, ERC2981) returns (bool) {
+    return super.supportsInterface(interfaceId);
+  }
+  
   modifier mintCompliance(uint256 _mintAmount) {
     require(_mintAmount > 0 && _mintAmount <= maxMintAmountPerTx, 'Invalid mint amount!');
     require(totalSupply() + _mintAmount <= maxSupply, 'Max supply exceeded!');
@@ -51,8 +60,7 @@ contract YourNftToken is ERC721AQueryable, Ownable, ReentrancyGuard {
     _;
   }
 
-  function whitelistMint(uint256 _mintAmount, bytes32[] calldata _merkleProof) public payable mintCompliance(_mintAmount) mintPriceCompliance(_mintAmount) {
-    // Verify whitelist requirements
+  function whitelistMint(uint256 _mintAmount, bytes32[] calldata _merkleProof) external payable mintCompliance(_mintAmount) mintPriceCompliance(_mintAmount) {
     require(whitelistMintEnabled, 'The whitelist sale is not enabled!');
     require(!whitelistClaimed[_msgSender()], 'Address already claimed!');
     bytes32 leaf = keccak256(abi.encodePacked(_msgSender()));
@@ -62,13 +70,12 @@ contract YourNftToken is ERC721AQueryable, Ownable, ReentrancyGuard {
     _safeMint(_msgSender(), _mintAmount);
   }
 
-  function mint(uint256 _mintAmount) public payable mintCompliance(_mintAmount) mintPriceCompliance(_mintAmount) {
+  function mint(uint256 _mintAmount) external payable mintCompliance(_mintAmount) mintPriceCompliance(_mintAmount) {
     require(!paused, 'The contract is paused!');
-
     _safeMint(_msgSender(), _mintAmount);
   }
   
-  function mintForAddress(uint256 _mintAmount, address _receiver) public mintCompliance(_mintAmount) onlyOwner {
+  function mintForAddress(uint256 _mintAmount, address _receiver) external mintCompliance(_mintAmount) onlyOwner {
     _safeMint(_receiver, _mintAmount);
   }
 
@@ -89,7 +96,17 @@ contract YourNftToken is ERC721AQueryable, Ownable, ReentrancyGuard {
         : '';
   }
 
-  function setRevealed(bool _state) public onlyOwner {
+  function setRoyaltyFee(uint96 _feeNumerator) external onlyOwner {
+    royaltyFee = _feeNumerator;
+    _setDefaultRoyalty(royaltyAddress, royaltyFee);
+  }
+
+  function setRoyaltyAddress(address _royaltyAddress) external onlyOwner {
+    royaltyAddress = _royaltyAddress;
+    _setDefaultRoyalty(royaltyAddress, royaltyFee);
+  }
+
+  function setRevealed(bool _state) external onlyOwner {
     revealed = _state;
   }
 
@@ -105,41 +122,29 @@ contract YourNftToken is ERC721AQueryable, Ownable, ReentrancyGuard {
     hiddenMetadataUri = _hiddenMetadataUri;
   }
 
-  function setUriPrefix(string memory _uriPrefix) public onlyOwner {
+  function setUriPrefix(string memory _uriPrefix) external onlyOwner {
     uriPrefix = _uriPrefix;
   }
 
-  function setUriSuffix(string memory _uriSuffix) public onlyOwner {
+  function setUriSuffix(string memory _uriSuffix) external onlyOwner {
     uriSuffix = _uriSuffix;
   }
 
-  function setPaused(bool _state) public onlyOwner {
+  function setPaused(bool _state) external onlyOwner {
     paused = _state;
   }
 
-  function setMerkleRoot(bytes32 _merkleRoot) public onlyOwner {
+  function setMerkleRoot(bytes32 _merkleRoot) external onlyOwner {
     merkleRoot = _merkleRoot;
   }
 
-  function setWhitelistMintEnabled(bool _state) public onlyOwner {
+  function setWhitelistMintEnabled(bool _state) external onlyOwner {
     whitelistMintEnabled = _state;
   }
 
-  function withdraw() public onlyOwner nonReentrant {
-    // This will pay HashLips Lab Team 5% of the initial sale.
-    // By leaving the following lines as they are you will contribute to the
-    // development of tools like this and many others.
-    // =============================================================================
-    (bool hs, ) = payable(0x146FB9c3b2C13BA88c6945A759EbFa95127486F4).call{value: address(this).balance * 5 / 100}('');
-    require(hs);
-    // =============================================================================
-
-    // This will transfer the remaining contract balance to the owner.
-    // Do not remove this otherwise you will not be able to withdraw the funds.
-    // =============================================================================
+  function withdraw() external onlyOwner nonReentrant {
     (bool os, ) = payable(owner()).call{value: address(this).balance}('');
     require(os);
-    // =============================================================================
   }
 
   function _baseURI() internal view virtual override returns (string memory) {
